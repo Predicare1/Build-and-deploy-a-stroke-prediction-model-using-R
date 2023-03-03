@@ -254,14 +254,14 @@ skim(complete_data)
 ## Create a correlation plot  
 
 ```{r}
-## Correlation chart
-complete_data %>%
-  dplyr::select_if(is.numeric) %>% 
-  chart.Correlation()
+## Create a correlation matrix of the numeric variables in the dataset
+complete_data %>% 
+  dplyr::select(age, avg_glucose_level, bmi) %>% 
+  cor()
 
 ## Correlation Matrix
 complete_data %>%
-  dplyr::select_if(is.numeric) %>%
+  dplyr::select(age, avg_glucose_level, bmi) %>%
   ggcorr(label = TRUE)
 
 ```
