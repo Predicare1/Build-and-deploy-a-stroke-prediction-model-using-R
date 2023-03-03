@@ -574,7 +574,7 @@ Amazing! A prediction was returned. This API can be integrated into many web sys
 
 # References
 
-1. Isixsigma. Variance Inflation Factor (VIF). Isixsigma website. https://www.isixsigma.com/dictionary/variance-inflation-factor-vif/. Published November 7, 201. Accessed March 3, 2023.
+1. Isixsigma. Variance Inflation Factor (VIF). Isixsigma website. https://www.isixsigma.com/dictionary/variance-inflation-factor-vif/. Published November 7, 2018. Accessed March 3, 2023.
 
 2. Austin DE, Lee DS, Wang CX, et al. Comparison of machine learning and the regression-based EHMRG model for predicting early mortality in acute heart failure. Int J Cardiol. 2022;365:78-84. doi:10.1016/j.ijcard.2022.07.035
 
