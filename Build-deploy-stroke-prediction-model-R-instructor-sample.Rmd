@@ -1,0 +1,587 @@
+---
+title: "Build and deploy a stroke prediction model using R"
+date: "`r Sys.Date()`"
+output:
+  html_document:
+    theme: !expr bslib::bs_theme(bootswatch = "cerulean", font_scale = 0.8)
+    highlight: kate
+    base_font: !expr bslib::font_google("Grandstander")
+    code_folding: show
+    toc: true
+    toc_depth: 2
+    toc_float:
+      collapse: true
+      smooth_scroll: true
+author: "Olayinka Arimoro"
+---
+
+
+
+```{r setup, include=FALSE}
+## Set knit options
+knitr::opts_chunk$set(echo = TRUE, fig.width = 8, fig.height = 5, message = F, warning = F)
+
+## Set theme options
+thematic::thematic_on()
+```
+
+
+# About Data Analysis Report
+This RMarkdown file contains the report of the data analysis done for the project on building and deploying in R. It contains analysis such as data exploration, summary statistics and building the prediction models. The final report was completed on `r date()`. 
+
+**Context:**
+According to the World Health Organization (WHO) stroke is the 2nd leading cause of death globally, responsible for approximately 11% of total deaths.
+
+This dataset is used to predict whether a patient is likely to get stroke based on the input parameters like gender, age, various diseases, and smoking status. Each row in the data provides relavant information about the patient.
+
+Data Source: https://www.kaggle.com/datasets/fedesoriano/stroke-prediction-dataset?resource=download
+
+# Task One: Import data and data preprocessing
+
+## Load data and install packages
+
+You may need to install these packages if not installed. You can use the `install.packages()` function.
+
+```{r message = F, warning = F}
+## Import required packages
+library(tidyverse)
+library(tidymodels)
+library(themis)
+library(table1)
+library(ggpubr)
+library(broom)
+library(ggfortify)
+library(GGally)
+library(PerformanceAnalytics)
+library(car)
+library(skedastic)
+library(caret)
+library(mice)
+library(VIM)
+library(discrim)
+library(skimr)
+library(glmnet)
+library(kknn)
+library(naivebayes)
+library(vetiver)
+library(plumber)
+library(gridExtra)
+
+## Set a theme option
+theme_set(theme_light())
+
+## Load the data set
+full_df <- read_csv("healthcare-dataset-stroke-data.csv")
+```
+
+## Describe and explore the data
+```{r}
+## Get a broad overview of the data
+skim(full_df)
+
+## Glimpse the data
+glimpse(full_df)
+
+## Quick data pre-processing - fix variable data types
+full_df_preprocess <- full_df %>% 
+  mutate_at(vars(!c(age, bmi, avg_glucose_level)), as.factor) %>% 
+  mutate_at(vars(c(bmi)), as.numeric)
+
+## Label the stroke variable
+full_df_preprocess$stroke<- factor(full_df_preprocess$stroke, 
+                                   levels = c(0,1), 
+                                   labels = c("No", "Yes"))
+
+## Label the hypertension variable
+full_df_preprocess$hypertension<- factor(full_df_preprocess$hypertension,
+                                         levels = c(0,1), 
+                                         labels = c("No", "Yes"))
+
+## Label the heart_disease variable
+full_df_preprocess$heart_disease<- factor(full_df_preprocess$heart_disease, 
+                                 levels = c(0,1), 
+                                 labels = c("No", "Yes"))
+
+## Create the summary table
+table1::table1(~ . , data = full_df_preprocess)
+```
+
+**Note:** The reason for these quick data pre-processing steps is to aid nice visualizations.
+
+## Data visualizations
+
+It is time to generate some graphs from the data to gain insights. We will plot the distribution for features – `gender`, `hypertension`, `heart_disease` and `ever_married`.
+```{r}
+## Create plots
+p1 <- ggplot(full_df_preprocess, aes(x="", y=gender, fill=gender)) + 
+  geom_bar(stat="identity", width=1)  + 
+  coord_polar("y", start=0)
+
+p2 <-ggplot(full_df_preprocess, aes(x="", y=hypertension, fill=hypertension)) +
+  geom_bar(stat="identity", width=1)  + 
+  coord_polar("y", start=0)
+
+p3 <-ggplot(full_df_preprocess, aes(x="", y=heart_disease, fill=heart_disease)) +
+  geom_bar(stat="identity", width=1)  + 
+  coord_polar("y", start=0)
+
+p4 <-ggplot(full_df_preprocess, aes(x="", y=ever_married, fill=ever_married)) +
+  geom_bar(stat="identity", width=1)  + 
+  coord_polar("y", start=0)
+
+## Arrange the graphs
+grid.arrange(p1,p2,p3,p4, ncol= 2)
+```
+
+Further, we can visualize the distribution of the next set of features – `residence_type`, and `stroke`.
+
+```{r}
+## Create plots
+ggplot(full_df_preprocess, aes(x="", y=Residence_type, fill=Residence_type)) +
+  geom_bar(stat="identity", width=1) + 
+  coord_polar("y", start=0)
+
+
+ggplot(full_df_preprocess, aes(x="", y=stroke, fill=stroke)) + 
+  geom_bar(stat="identity", width=1) + 
+  coord_polar("y", start=0)
+```
+
+All these graphs and charts provide a lot of useful information about the data set, such as:
+
+* Less than 10% of patients have hypertension
+
+* About 5% of patients have heart disease
+
+* There is an equal split for the feature ‘residence type’, i.e., 50% of the population comes from rural regions and 50% from urban
+
+* About 57 per cent of patients are working in the private sector & more than 65 percent were married
+
+We can create a few additional bar charts to see how each of these variables relates to the target variable, which is the stroke possibility for the individual.
+
+```{r}
+## Create plots
+p1 <- ggplot(data = full_df_preprocess) +
+  geom_bar(mapping = aes(x = gender, fill=stroke))
+
+p2 <-ggplot(data = full_df_preprocess) +
+  geom_bar(mapping = aes(x = hypertension, fill=stroke))
+
+p3 <-ggplot(data = full_df_preprocess) +
+  geom_bar(mapping = aes(x = heart_disease, fill=stroke)) 
+
+p4 <-ggplot(data = full_df_preprocess) +
+  geom_bar(mapping = aes(x = ever_married, fill=stroke)) 
+
+## Arrange the graphs
+grid.arrange(p1,p2,p3,p4, ncol= 2)
+```
+
+```{r}
+## Create plots
+p5 <- ggplot(data = full_df_preprocess) +
+  geom_bar(mapping = aes(x = work_type, fill=stroke))
+
+p6 <-ggplot(data = full_df_preprocess) +
+  geom_bar(mapping = aes(x = Residence_type, fill=stroke))
+
+p7 <-ggplot(data = full_df_preprocess) +
+  geom_bar(mapping = aes(x = smoking_status, fill=stroke)) 
+
+## Arrange the graphs
+grid.arrange(p5,p6,p7, ncol= 1)
+```
+
+Amazing! These graphs will support the decision for the next phase of the analysis - **data pre-processing**. This stage of pre-processing will prepare the data for the modelling phase.
+
+## Data pre-processing
+
+```{r}
+## Preprocess the data
+stroke_data <- full_df %>% 
+        ## Remove the id column
+        #select(!c(work_type)) %>% 
+        ## Change "N/A" to missing
+        mutate_at(c('bmi'), ~na_if(., "N/A")) %>% 
+        ## Change "Unknown" and "Other" to missing
+        mutate_at(c('smoking_status'), ~na_if(., "Unknown")) %>% 
+        mutate_at(c('gender'), ~na_if(., "Other")) %>% 
+        ## Recode variables and set correct data type
+        mutate(gender = case_when(
+          gender == "Male" ~ 0,
+          gender == "Female" ~ 1),
+          ever_married = case_when(
+          ever_married == "No" ~ 0,
+          ever_married == "Yes" ~ 1),
+          Residence_type = case_when(
+          Residence_type == "Rural" ~ 0,
+          Residence_type == "Urban" ~ 1),
+          smoking_status = case_when(
+          smoking_status == "never smoked" ~ 0,
+          smoking_status %in% c("formerly smoked", "smokes") ~ 1)) %>% 
+          mutate_at(vars(c(bmi)), as.numeric)
+        
+
+## Take a glimpse at the preprocessed data
+glimpse(stroke_data)
+                
+```
+
+## Imputate missing values using multiple imputation
+```{r}
+## Impute the data using multiple imputation
+md.pattern(stroke_data)
+
+## View missing values pattern
+mice_plot <- aggr(stroke_data, col=c('navyblue','yellow'),
+                  numbers=TRUE, sortVars=TRUE,
+                  labels=names(stroke_data), cex.axis=.7,
+                  gap=3, ylab=c("Missing data","Pattern"))
+
+## Impute the missing values
+imputed_Data <- mice(stroke_data, m=5, maxit = 50, 
+                     method = 'pmm', seed = 500)
+
+## Select complete data (2nd out of 5)
+complete_data <- complete(imputed_Data,2)
+
+## Explore the cleaned data
+head(complete_data)
+glimpse(complete_data)
+skim(complete_data)
+```
+
+## Create a correlation plot  
+
+```{r}
+## Correlation chart
+complete_data %>%
+  dplyr::select_if(is.numeric) %>% 
+  chart.Correlation()
+
+## Correlation Matrix
+complete_data %>%
+  dplyr::select_if(is.numeric) %>%
+  ggcorr(label = TRUE)
+
+```
+
+These correlation plots shows that issues of **multicollinearity** is not of concern since no two variables had high correlation coefficients.
+
+## Variance inflation factor (VIF)
+A variance inflation factor (VIF) is a measure of the amount of multicollinearity in regression analysis. It is important to see if the continuous variables (features) are collinear.
+
+**What Can VIF Tell You?**
+
+* VIF equal to 1 = variables are not correlated
+
+* VIF between 1 and 5 = variables are moderately correlated 
+
+* VIF greater than 5 = variables are highly correlated [1].
+
+```{r}
+car::vif(lm(stroke ~ age + bmi + avg_glucose_level, complete_data)) %>% 
+  broom::tidy()
+```
+
+# Task Two: Build prediction models
+
+## Preparing data for Modelling  
+```{r}
+complete_data <- complete_data %>% 
+  mutate_at(vars(c(hypertension, heart_disease, stroke,
+                         gender, ever_married, Residence_type,
+                         smoking_status, work_type)), as.factor) 
+```
+
+## Data Partitioning
+```{r}
+## Set the seed
+set.seed(2023)
+
+## Create data split
+stroke_split <- initial_split(complete_data, prop = .8, strata = stroke)
+
+## Create training and testing sets
+stroke_train <- training(stroke_split)
+stroke_test <- testing(stroke_split)
+
+## Check the dimension
+dim(stroke_train)
+dim(stroke_test)
+```
+
+## Creating Recipes
+```{r}
+stroke_rec <- recipe(formula = stroke ~ ., data = stroke_train) %>%
+  update_role(id, new_role = "ID") %>%
+  step_novel(all_nominal_predictors()) %>%
+  step_dummy(all_nominal_predictors(), one_hot = TRUE) %>%
+  step_zv(all_predictors()) %>%
+  step_normalize(all_numeric_predictors()) %>% 
+  step_downsample(stroke)
+```
+
+## 10 Fold Cross Validation
+```{r}
+stroke_folds <- vfold_cv(stroke_train)
+```
+
+## Model Specification
+```{r}
+## Decision tree
+decision_tree_rpart_spec <-
+  decision_tree(tree_depth = tune(), min_n = tune(), 
+                cost_complexity = tune()) %>%
+  set_engine('rpart') %>%
+  set_mode('classification')
+
+## Logistic regression
+logistic_reg_glmnet_spec <-
+  logistic_reg(penalty = tune(), mixture = tune()) %>%
+  set_engine('glmnet')
+
+## Naive Bayes
+naive_Bayes_naivebayes_spec <-
+  naive_Bayes(smoothness = tune(), Laplace = tune()) %>%
+  set_engine('naivebayes')
+
+## K-Nearest Neighbours
+nearest_neighbor_kknn_spec <-
+  nearest_neighbor(neighbors = tune(), 
+                   weight_func = tune(), dist_power = tune()) %>%
+  set_engine('kknn') %>%
+  set_mode('classification')
+
+## Random forest
+rand_forest_ranger_spec <-
+  rand_forest(mtry = tune(), min_n = tune()) %>%
+  set_engine('ranger') %>%
+  set_mode('classification')
+
+## Linear Support Vector Machine (SVM)
+svm_linear_kernlab_spec <-
+  svm_linear(cost = tune(), margin = tune()) %>%
+  set_engine('kernlab') %>%
+  set_mode('classification')
+
+## Radial Basis Function (RBF) kernel SVM
+svm_rbf_kernlab_spec <-
+  svm_rbf(cost = tune(), rbf_sigma = tune(), margin = tune()) %>%
+  set_engine('kernlab') %>%
+  set_mode('classification')
+
+## XGBoost
+xgboost_spec <- 
+  boost_tree(trees = tune(), mtry = tune(), learn_rate = tune()) %>% 
+  set_engine("xgboost") %>% 
+  set_mode("classification")
+
+```
+
+## Creating Workflowsets
+```{r}
+stroke_workflow_set <- workflow_set(
+  preproc = list(rec = stroke_rec),
+  models = list(logistic_reg = logistic_reg_glmnet_spec,
+                decision_tree = decision_tree_rpart_spec,
+                naive_bayes = naive_Bayes_naivebayes_spec,
+                knn = nearest_neighbor_kknn_spec,
+                random_forest = rand_forest_ranger_spec,
+                svm_linear = svm_linear_kernlab_spec,
+                svm_rbf = svm_rbf_kernlab_spec,
+                xgboost = xgboost_spec)
+)
+
+#stroke_workflow_set
+```
+
+## Setting control options
+```{r}
+## Setting up the control parameters
+grid_ctrl <- control_grid(
+  verbose = TRUE,
+  save_pred = TRUE,
+  parallel_over = "everything",
+  save_workflow = TRUE
+)
+```
+
+## Defining Metrics 
+```{r}
+stroke_metrics <- metric_set(accuracy, roc_auc, f_meas, sens, spec)
+```
+
+## Model Tuning 
+
+**Note:** I will comment this set because it will take long to run. So, I provided the result from this model tuning that can be loaded.
+```{r error=FALSE}
+## Create parallel training
+#doParallel::registerDoParallel()
+
+## Tune the model 
+#grid_results <- stroke_workflow_set %>% 
+   #workflow_map(
+    # verbose = TRUE,
+    # seed = 2023,
+    # resamples = stroke_folds,
+    # grid = 7,
+    # control = grid_ctrl,
+    #metrics = stroke_metrics
+   #)
+
+## Stop parallel training 
+#doParallel::stopImplicitCluster()
+
+## Save the grid results
+#write_rds(grid_results, "grid_results.rds")
+
+## Load the grid results
+grid_results <- read_rds("grid_results.rds")
+```
+
+# Task Three: Evaluate and select prediction models
+
+## Create a table of model metric results
+```{r}
+grid_results %>% 
+  rank_results(select_best = TRUE) %>% 
+  mutate(across(c("mean","std_err"),round, 3)) %>% 
+  select(wflow_id,.metric,mean) %>% 
+  pivot_wider(names_from = .metric, values_from = mean) %>% 
+  arrange(-f_meas)
+```
+
+## Plot the best model
+```{r}
+autoplot(grid_results, select_best = TRUE)
+```
+
+**Note:** Judging by the model results (such as the sensitivity and F1-score), the Radial Basis Function (RBF) kernel SVM and logistic regression model are among the best performing models.
+
+The choice of which model to select depends on different factors. In this case, I decided to select the logistic regression model for several reasons:
+
+* Although the RBF SVM and logistic regression had comparable metric results; however, from the plot of the models above, the confidence interval (CI) band around the SVM is wide. This wide CI suggests that the SVM is unstable (high variability) and may not be appropriate in practice.
+
+* Also, several empirical and simulation studies have shown that *"Logistic regression was comparable to ML in discrimination, but was superior to ML algorithms in calibration overall"* [2-5].
+
+With these evidences, we pull the best parameters from the logistic regression model and finalize the workflow.
+
+```{r}
+## Return the best model
+best_results <- grid_results %>% 
+  extract_workflow_set_result("rec_logistic_reg") %>% 
+  select_best(metric = "f_meas")
+
+## Finalize the workflow using best model
+final_wf <- grid_results %>% 
+  extract_workflow("rec_logistic_reg") %>% 
+  finalize_workflow(best_results)
+
+## Create parallel training
+doParallel::registerDoParallel()
+
+## Fit the final model
+stroke_last_fit <- final_wf %>% 
+  last_fit(stroke_split, metrics = stroke_metrics)
+
+## Stop parallel training
+doParallel::stopImplicitCluster()
+
+## Return final metrics
+collect_metrics(stroke_last_fit)
+
+## Create a plot
+stroke_last_fit %>% 
+  collect_predictions() %>% 
+  conf_mat(estimate = .pred_class, truth = stroke) %>% 
+  autoplot()
+```
+
+## Fitting final model to entire data.  
+```{r}
+## Fit the final model
+model <- fit(final_wf, complete_data)
+
+## Predict on some data
+predict(model, complete_data[1,] %>% select(-stroke), type = "prob")
+
+## Saving model
+## write_rds(model,"stroke_model.rds")
+```
+
+# Task Four: Deploy the prediction model
+
+Now that we have created the prediction model, we can deploy the model using `R Shiny` or `Vetiver`. I will show how to deploy using `Vetiver` in this script. I created a separate R script to deploy the model using `R Shiny`.
+
+**Important:** 
+
+Although, I provided a rationale for selecting the final prediction model. However, this model may not work well on new data. If that happens, all that is needed is to check through the data pre-processing, maybe create more informative variables and go through that iterative process till we have a desired output. As you will know that end-to-end predictive modelling is an iterative and ongoing process.
+
+Having made that important caveat, we can proceed to deploy the model using `Vetiver`.
+
+
+## Deploy with Vetiver
+
+A vetiver_model() object collects the information needed to store, version, and deploy a trained model.
+
+```{r}
+## Load the model model
+model <- read_rds("stroke_model.rds")
+
+## Create a Vetiver object
+v_model <- vetiver_model(model, "stroke_model")
+```
+
+You can deploy your pinned `vetiver_model()` via a `Plumber` API, which can be hosted in a variety of ways.
+
+```{r}
+pr() %>%
+  vetiver_api(v_model) %>%
+  pr_run(port = 8088)
+```
+
+Running the code chunk above would launch the API in a browser.
+
+**Steps to make predictions:**
+
+1. After running the code chunk above, a web interface will open
+
+2. Click on **POST** because we want to make predictions
+
+3. Under **POST REQUEST**, click on example. You can copy the example below to test out the API.
+
+[
+  {
+    "gender": "0",
+    "age":67,
+    "hypertension": "0",
+    "heart_disease": "1",
+    "ever_married": "1",
+    "work_type": "Private",
+    "Residence_type": "1",
+    "avg_glucose_level": 228.69,
+    "bmi": 36.6,
+    "smoking_status": "1",
+    "id" : 9046
+  }
+]
+
+4. Click on the **TRY** button to get a prediction.
+
+Amazing! A prediction was returned. This API can be integrated into many web systems.
+
+
+# References
+
+1. Isixsigma. Variance Inflation Factor (VIF). Isixsigma website. https://www.isixsigma.com/dictionary/variance-inflation-factor-vif/. Published November 7, 201. Accessed March 3, 2023.
+
+2. Austin DE, Lee DS, Wang CX, et al. Comparison of machine learning and the regression-based EHMRG model for predicting early mortality in acute heart failure. Int J Cardiol. 2022;365:78-84. doi:10.1016/j.ijcard.2022.07.035
+
+3. Lynam AL, Dennis JM, Owen KR, et al. Logistic regression has similar performance to optimised machine learning algorithms in a clinical setting: application to the discrimination between type 1 and type 2 diabetes in young adults. Diagn Progn Res. 2020;4:6. Published 2020 Jun 4. doi:10.1186/s41512-020-00075-2
+
+4. Austin PC, Harrell FE Jr, Lee DS, Steyerberg EW. Empirical analyses and simulations showed that different machine and statistical learning methods had differing performance for predicting blood pressure. Sci Rep. 2022;12(1):9312. Published 2022 Jun 3. doi:10.1038/s41598-022-13015-5
+
+5. Mišić VV, Rajaram K, Gabel EA. Simulation-based evaluation of machine learning models for clinical decision support: application and analysis using hospital readmission. npj Digit. Med. 4, 98 (2021). https://doi.org/10.1038/s41746-021-00468-7
+
+
